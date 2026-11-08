@@ -1310,3 +1310,113 @@ button:active,
     filter: none;
   }
 }
+
+
+/* ==========================================
+   BOLIM MOBILE V4.0 — STABLE REFRACTION
+   Desktop behavior remains unchanged.
+========================================== */
+
+@media (max-width: 600px) and (pointer: coarse) {
+
+  .deck-stage {
+    --rear-content-opacity: .26 !important;
+  }
+
+  /* Don't apply filters to the entire
+     transformed 3D card on mobile. */
+
+  .deck-stage .deck-card:is(
+    .rear-one,
+    .rear-two,
+    .rear-three,
+    .rear-four
+  ) {
+    -webkit-filter: none !important;
+    filter: none !important;
+  }
+
+  /* Remove the previous mobile surface blur. */
+
+  .deck-stage .deck-card:is(
+    .rear-one,
+    .rear-two,
+    .rear-three,
+    .rear-four
+  ) .card-surface {
+    -webkit-filter: none !important;
+    filter: none !important;
+    opacity: 1;
+  }
+
+  /* Blur content at desktop-matched levels. */
+
+  .deck-stage .deck-card.rear-one >
+  :is(.card-header,.card-body,.card-footer) {
+    -webkit-filter: blur(1.5px) !important;
+    filter: blur(1.5px) !important;
+  }
+
+  .deck-stage .deck-card.rear-two >
+  :is(.card-header,.card-body,.card-footer) {
+    -webkit-filter: blur(2px) !important;
+    filter: blur(2px) !important;
+  }
+
+  .deck-stage .deck-card.rear-three >
+  :is(.card-header,.card-body,.card-footer) {
+    -webkit-filter: blur(3.5px) !important;
+    filter: blur(3.5px) !important;
+  }
+
+  .deck-stage .deck-card.rear-four >
+  :is(.card-header,.card-body,.card-footer) {
+    -webkit-filter: blur(4px) !important;
+    filter: blur(4px) !important;
+  }
+
+  .deck-stage .deck-card.front >
+  :is(.card-header,.card-body,.card-footer) {
+    -webkit-filter: none !important;
+    filter: none !important;
+    opacity: 1;
+  }
+
+  /* Prevent stale incoming refraction frames. */
+
+  .deck-stage.mobile-glass-flight
+  .deck-card.glass-incoming
+  .card-liquid-canvas {
+    opacity: 0 !important;
+  }
+
+  .deck-stage.mobile-glass-flight
+  .deck-card.glass-incoming
+  .card-surface {
+    opacity: 1 !important;
+  }
+
+  /* Prevent residual transform easing
+     during the mobile glass handoff. */
+
+  .deck-stage.mobile-glass-settling
+  .deck-card {
+    transition: none !important;
+  }
+
+  /* Temporarily show the card surface
+     while the new glass frame is rendered. */
+
+  .deck-stage.mobile-glass-settling
+  .deck-card.front
+  .card-liquid-canvas {
+    opacity: 0 !important;
+  }
+
+  .deck-stage.mobile-glass-settling
+  .deck-card.front
+  .card-surface {
+    opacity: 1 !important;
+    transition: none !important;
+  }
+}

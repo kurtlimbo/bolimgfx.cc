@@ -66,6 +66,18 @@ const GLASS_FLIGHT_INTERVAL = 34;
 const GLASS_IDLE_INTERVAL = 20;
 const SNAPSHOT_DPR_CAP = 1.15;
 
+
+// BOLIM_MOBILE_GLASS_V40
+
+function mobileGlassDevice() {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia(
+      "(max-width: 600px) and (pointer: coarse)"
+    ).matches
+  );
+}
+
 type Direction = 1 | -1;
 type DragStart = {
   x: number;
@@ -314,6 +326,12 @@ export default function Home() {
   const mouse = useRef({ x: 0, y: 0 });
   const repaint = useRef<() => void>(() => {});
 
+  // Paint the lens using final card coordinates.
+  const renderSettledGlass =
+    useRef<() => void>(() => {});
+
+  const mobileTurnId = useRef(0);
+
   const snapshots = useRef<{
     key: string;
     images: (HTMLCanvasElement | null)[];
@@ -405,6 +423,14 @@ export default function Home() {
 
     function paint() {
       if (disposed || document.hidden || !deck) return;
+
+      // Avoid mobile WebKit compositing jitter.
+      if (
+        mobileGlassDevice() &&
+        flightRunning.current
+      ) {
+        return;
+      }
 
       const stageW = deck.clientWidth;
       const stageH = deck.clientHeight;
@@ -533,6 +559,14 @@ export default function Home() {
       scheduled = requestAnimationFrame((time) => {
         scheduled = 0;
 
+        // Freeze mobile glass during the 3D orbit.
+        if (
+          mobileGlassDevice() &&
+          flightRunning.current
+        ) {
+          return;
+        }
+
         const interval = flightRunning.current
           ? GLASS_FLIGHT_INTERVAL
           : GLASS_IDLE_INTERVAL;
@@ -550,6 +584,7 @@ export default function Home() {
     }
 
     repaint.current = queue;
+    renderSettledGlass.current = paint;
 
     const idle = () =>
       new Promise<void>((resolve) => {
@@ -647,13 +682,15 @@ export default function Home() {
           if (disposed) break;
           if (images[index]) continue;
 
+          // Avoid expensive captures during swipe.
+          await waitForSwipe();
+
           if (index !== priority) {
-            await waitForSwipe();
             await idle();
             await waitForSwipe();
-
-            if (disposed) break;
           }
+
+          if (disposed) break;
 
           const card = cards.find(
             (el) =>
@@ -744,6 +781,13 @@ export default function Home() {
     }
 
     const observer = new ResizeObserver(() => {
+      if (
+        mobileGlassDevice() &&
+        flightRunning.current
+      ) {
+        return;
+      }
+
       queue();
       void captureCards();
     });
@@ -765,6 +809,7 @@ export default function Home() {
       engines.clear();
 
       repaint.current = () => {};
+      renderSettledGlass.current = () => {};
     };
   }, []);
 
@@ -833,6 +878,14 @@ export default function Home() {
     const deck = deckRef.current;
     if (!deck) return;
 
+    if (
+      mobileGlassDevice() &&
+      deck.classList.contains("mobile-glass-settling")
+    ) {
+      pendingSwipe.current = direction;
+      return;
+    }
+
     const cards = Array.from(
       deck.querySelectorAll<HTMLElement>(".deck-card")
     );
@@ -861,6 +914,18 @@ export default function Home() {
 
     busy.current = true;
     flightRunning.current = true;
+
+    const turnId = ++mobileTurnId.current;
+
+    if (mobileGlassDevice()) {
+      deck.classList.remove(
+        "mobile-glass-settling"
+      );
+
+      deck.classList.add(
+        "mobile-glass-flight"
+      );
+    }
 
     const reduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
@@ -1224,6 +1289,47 @@ export default function Home() {
 
       if (queued === null) {
         stageElement.classList.remove("swiping-live");
+
+        if (mobileGlassDevice()) {
+          stageElement.classList.add(
+            "mobile-glass-settling"
+          );
+
+          requestAnimationFrame(() => {
+            if (
+              !mounted.current ||
+              mobileTurnId.current !== turnId
+            ) {
+              return;
+            }
+
+            // Calculate refraction at the final
+            // resting position of the front card.
+            renderSettledGlass.current();
+
+            requestAnimationFrame(() => {
+              if (
+                !mounted.current ||
+                mobileTurnId.current !== turnId
+              ) {
+                return;
+              }
+
+              stageElement.classList.remove(
+                "mobile-glass-flight",
+                "mobile-glass-settling"
+              );
+
+              const next = pendingSwipe.current;
+              pendingSwipe.current = null;
+
+              if (next !== null) {
+                turn(next);
+              }
+            });
+          });
+        }
+
         return;
       }
 

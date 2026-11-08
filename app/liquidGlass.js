@@ -873,12 +873,7 @@ function opticsFor(opt) {
     ),
 
     blur: clamp(
-      isMobileTouch()
-        ? Math.max(
-            7.5,
-            Number(opt.blur ?? 0)
-          )
-        : Number(opt.blur ?? 0),
+      Number(opt.blur ?? 0),
       0,
       10
     ),
