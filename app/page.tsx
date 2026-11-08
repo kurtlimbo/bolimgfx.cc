@@ -331,6 +331,12 @@ export default function Home() {
   const renderSettledGlass =
     useRef<() => void>(() => {});
 
+  // BOLIM_MOBILE_GLASS_V43: mobile-only pre-rendered glass handoff.
+  const prepareIncomingGlass =
+    useRef<(index: number) => boolean>(() => false);
+  const warmAdjacentGlass =
+    useRef<() => void>(() => {});
+
   const mobileTurnId = useRef(0);
 
   const previewReady = useRef(
@@ -411,6 +417,11 @@ export default function Home() {
     >();
 
     let previewSize = "";
+
+    // All previews are cached by the existing snapshot geometry.
+    const preparedLens = new Set<number>();
+    let preparedKey = "";
+    let warmTimer: number | null = null;
 
     function refreshRearPreviews() {
       if (!mobileGlassDevice()) return;
@@ -505,21 +516,27 @@ const selectedDepth =
       return pts;
     }
 
-    function paint() {
-      if (disposed || document.hidden || !deck) return;
+    function paint(
+      force = false,
+      onlyIndex: number | null = null
+    ): boolean {
+      if (disposed || document.hidden || !deck) return false;
 
-      // Avoid mobile WebKit compositing jitter.
+      // No live WebGL redraw while moving in iOS WebKit.
       if (
+        !force &&
         mobileGlassDevice() &&
         flightRunning.current
       ) {
-        return;
+        return false;
       }
+
+      let painted = false;
 
       const stageW = deck.clientWidth;
       const stageH = deck.clientHeight;
 
-      if (!stageW || !stageH) return;
+      if (!stageW || !stageH) return false;
 
       const deckRect = deck.getBoundingClientRect();
 
@@ -534,6 +551,7 @@ const selectedDepth =
         }
 
         const index = Number(card.dataset.cardIndex);
+        if (onlyIndex !== null && index !== onlyIndex) continue;
         const nextIndex = (index + 1) % TOTAL;
 
         const readyTexture =
@@ -623,8 +641,10 @@ const selectedDepth =
           lightX: mouse.current.x + 0.5,
           lightY: mouse.current.y + 0.5,
         });
+        painted = true;
 
         if (
+          !force &&
           isFront &&
           sourceImage &&
           sourceQuad &&
@@ -635,6 +655,7 @@ const selectedDepth =
       }
 
       lastPaint = performance.now();
+      return painted;
     }
 
     function queue() {
@@ -668,7 +689,120 @@ const selectedDepth =
     }
 
     repaint.current = queue;
-    renderSettledGlass.current = paint;
+    renderSettledGlass.current = () => { void paint(); };
+
+    function prepareFrontLens(targetIndex: number): boolean {
+      if (
+        disposed ||
+        !mobileGlassDevice() ||
+        document.hidden ||
+        flightRunning.current ||
+        deck.classList.contains("swiping-live")
+      ) {
+        return false;
+      }
+
+      const geometry = [
+        snapshots.current.key,
+        deck.clientWidth,
+        deck.clientHeight,
+      ].join(":");
+
+      if (geometry !== preparedKey) {
+        preparedKey = geometry;
+        preparedLens.clear();
+      }
+
+      const sourceIndex = (targetIndex + 1) % TOTAL;
+      if (!snapshots.current.images[sourceIndex]) return false;
+      if (preparedLens.has(targetIndex)) return true;
+
+      const incoming = cards.find(
+        (c) => Number(c.dataset.cardIndex) === targetIndex
+      );
+      const preview = incoming?.querySelector<HTMLCanvasElement>(
+        ".card-glass-preview"
+      );
+      const live = incoming?.querySelector<HTMLCanvasElement>(
+        ".card-liquid-canvas"
+      );
+      if (!incoming || !preview || !live) return false;
+
+      const originalClasses = cards.map((card) => card.className);
+      const slots = [
+        "front", "rear-one", "rear-two", "rear-three", "rear-four"
+      ];
+
+      try {
+        // There is no browser paint between these synchronous DOM changes.
+        // Avoid interpolated transforms when measuring future card corners.
+        deck.classList.add("glass-preparing");
+        cards.forEach((card, i) => {
+          const index = Number(card.dataset.cardIndex);
+          const slot = slots[(index - targetIndex + TOTAL) % TOTAL];
+          card.className =
+            "deck-card " + slot +
+            (originalClasses[i].includes("has-rear-preview")
+              ? " has-rear-preview" : "");
+        });
+
+        if (!paint(true, targetIndex) || !live.width || !live.height) {
+          return false;
+        }
+
+        // Important: copy in the same task as WebGL draw, BEFORE the
+        // WebGL drawing buffer can be discarded by the compositor.
+        preview.width = live.width;
+        preview.height = live.height;
+        const ctx = preview.getContext("2d");
+        if (!ctx) return false;
+        ctx.drawImage(live, 0, 0);
+        preparedLens.add(targetIndex);
+        return true;
+      } catch (error) {
+        console.warn("Mobile glass preparation skipped:", error);
+        return false;
+      } finally {
+        cards.forEach((card, i) => {
+          card.className = originalClasses[i];
+        });
+        // Flush the restored poses while transitions are disabled.
+        void deck.offsetWidth;
+        deck.classList.remove("glass-preparing");
+      }
+    }
+
+    prepareIncomingGlass.current = prepareFrontLens;
+
+    function warmNeighbors() {
+      if (
+        disposed || !mobileGlassDevice() ||
+        flightRunning.current || warmTimer !== null
+      ) return;
+
+      // Schedule preparation off the swipe's animation frames.
+      warmTimer = window.setTimeout(() => {
+        warmTimer = null;
+        if (
+          disposed || document.hidden || flightRunning.current ||
+          deck.classList.contains("mobile-glass-settling")
+        ) return;
+
+        const current = activeRef.current;
+        prepareFrontLens((current + 1) % TOTAL);
+
+        window.setTimeout(() => {
+          if (
+            disposed || document.hidden || flightRunning.current ||
+            deck.classList.contains("mobile-glass-settling")
+          ) return;
+          prepareFrontLens((activeRef.current + TOTAL - 1) % TOTAL);
+        }, 100);
+      }, 65);
+    }
+
+    warmAdjacentGlass.current = warmNeighbors;
+
 
     const idle = () =>
       new Promise<void>((resolve) => {
@@ -692,6 +826,39 @@ const selectedDepth =
         );
       }
     };
+
+
+    async function finishOtherRearDepths(
+      key: string,
+      width: number,
+      height: number,
+      images: (HTMLCanvasElement | null)[]
+    ) {
+      if (!mobileGlassDevice()) return;
+      for (let index = 0; index < TOTAL; index++) {
+        const image = images[index];
+        if (!image) continue;
+        let variants = previewCache.get(index);
+        if (!variants) {
+          variants = new Map();
+          previewCache.set(index, variants);
+        }
+        for (const depth of [1, 2, 3, 4]) {
+          if (disposed || previewSize !== key) return;
+          if (variants.has(depth)) continue;
+          await waitForSwipe();
+          await idle();
+          await waitForSwipe();
+          if (disposed || previewSize !== key) return;
+          if (!variants.has(depth)) {
+            variants.set(
+              depth, createRearRaster(image, width, height, depth)
+            );
+            refreshRearPreviews();
+          }
+        }
+      }
+    }
 
     async function captureCards() {
       if (
@@ -772,14 +939,13 @@ const selectedDepth =
       );
 
       const priority = (frontIndex + 1) % TOTAL;
+      const lookahead = (frontIndex + 2) % TOTAL;
+      const previous = (frontIndex + TOTAL - 1) % TOTAL;
 
-      const order = [
-        priority,
-        ...Array.from(
-          { length: TOTAL },
-          (_, i) => i
-        ).filter((i) => i !== priority),
-      ];
+      // Refraction for the NEXT front card uses TWO cards ahead.
+      const order = [priority, lookahead, frontIndex, previous,
+        ...Array.from({ length: TOTAL }, (_, i) => i)
+      ].filter((index, pos, all) => all.indexOf(index) === pos);
 
       try {
         await document.fonts.ready;
@@ -854,64 +1020,31 @@ const selectedDepth =
 
             queue();
 
-            // Create blur textures only
-            // when the browser is idle.
+            warmNeighbors();
 
+            // Keep the immediate depth raster for visual continuity.
+            // Alternate depths are finished after source-card captures.
             if (mobileGlassDevice()) {
-              const slot =
-                (index -
-                  activeRef.current +
-                  TOTAL) % TOTAL;
-
-              const first = slot || 4;
-
-              const order = [
-                first, 1, 2, 3, 4
-              ].filter(
-                (depth, i, all) =>
-                  all.indexOf(depth) === i
-              );
-
-              let variants =
-                previewCache.get(index);
-
+              const slot = (index - activeRef.current + TOTAL) % TOTAL;
+              const depth = slot || 4;
+              let variants = previewCache.get(index);
               if (!variants) {
                 variants = new Map();
-                previewCache.set(
-                  index,
-                  variants
-                );
+                previewCache.set(index, variants);
               }
 
-              for (const depth of order) {
-                if (disposed) break;
-
-                await waitForSwipe();
-                await idle();
-
-                if (
-                  disposed ||
-                  previewSize !== key
-                ) {
-                  break;
-                }
-
-                if (
-                  !variants.has(depth) &&
-                  images[index]
-                ) {
-                  variants.set(
-                    depth,
-                    createRearRaster(
-                      images[index]!,
-                      width,
-                      height,
-                      depth
-                    )
-                  );
-
-                  refreshRearPreviews();
-                }
+              await waitForSwipe();
+              await idle();
+              await waitForSwipe();
+              if (
+                !disposed && previewSize === key &&
+                images[index] && !variants.has(depth)
+              ) {
+                variants.set(
+                  depth,
+                  createRearRaster(images[index]!, width, height, depth)
+                );
+                refreshRearPreviews();
               }
             }
 
@@ -948,6 +1081,9 @@ const selectedDepth =
         };
 
         queue();
+        warmNeighbors();
+        void finishOtherRearDepths(key, width, height, images)
+          .catch((error) => console.warn("Rear raster idle work:", error));
       }
     }
 
@@ -979,8 +1115,12 @@ const selectedDepth =
       engines.forEach((engine) => engine.destroy());
       engines.clear();
 
+      if (warmTimer !== null) window.clearTimeout(warmTimer);
+
       repaint.current = () => {};
       renderSettledGlass.current = () => {};
+      prepareIncomingGlass.current = () => false;
+      warmAdjacentGlass.current = () => {};
       updateRearPreview.current = () => {};
     };
   }, []);
@@ -988,6 +1128,7 @@ const selectedDepth =
   useEffect(() => {
     repaint.current();
     updateRearPreview.current();
+    warmAdjacentGlass.current();
   }, [active]);
 
   // =======================================
@@ -1084,6 +1225,11 @@ const selectedDepth =
     );
 
     if (!incoming) return;
+
+    if (mobileGlassDevice()) {
+      incoming.dataset.glassPrepared =
+        prepareIncomingGlass.current(toActive) ? "1" : "0";
+    }
 
     busy.current = true;
     flightRunning.current = true;
@@ -1271,6 +1417,10 @@ const selectedDepth =
         rearRaster:
           card.querySelector<HTMLElement>(
             ".card-rear-raster"
+          ),
+        glassPreview:
+          card.querySelector<HTMLElement>(
+            ".card-glass-preview"
           ),
 
         startRasterOpacity: Number(
@@ -1526,6 +1676,8 @@ const selectedDepth =
               "mobile-glass-flight",
               "mobile-glass-settling"
             );
+            incomingCard.removeAttribute("data-glass-prepared");
+            warmAdjacentGlass.current();
 
             const next =
               pendingSwipe.current;
@@ -1573,6 +1725,8 @@ const selectedDepth =
                 "mobile-glass-flight",
                 "mobile-glass-settling"
               );
+              incomingCard.removeAttribute("data-glass-prepared");
+              warmAdjacentGlass.current();
 
               const next = pendingSwipe.current;
               pendingSwipe.current = null;
@@ -1769,6 +1923,16 @@ const selectedDepth =
           fadeBegin,
           fadeEnd
         );
+
+        if (
+          isArriving &&
+          item.card.dataset.glassPrepared === "1"
+        ) {
+          tween(
+            item.glassPreview, "opacity",
+            0, 1, fadeBegin, fadeEnd
+          );
+        }
       }
 
       if (isArriving) {
@@ -2135,6 +2299,11 @@ const selectedDepth =
 
             <canvas
               className="card-rear-raster"
+              aria-hidden="true"
+            />
+
+            <canvas
+              className="card-glass-preview"
               aria-hidden="true"
             />
 

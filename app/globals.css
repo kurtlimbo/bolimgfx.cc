@@ -1362,3 +1362,35 @@ button:active,
     transition: none !important;
   }
 }
+
+
+/* BOLIM_MOBILE_GLASS_V43: prepared mobile refraction during each 3D swipe. */
+.card-glass-preview { display: none; }
+.deck-card.lens-capture .card-glass-preview { display: none !important; }
+
+@media (max-width: 600px) and (pointer: coarse) {
+  .deck-stage.glass-preparing .deck-card,
+  .deck-stage.glass-preparing .deck-card :is(
+    .card-header, .card-body, .card-footer
+  ) { transition: none !important; }
+
+  .deck-stage .deck-card > .card-glass-preview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    display: block;
+    opacity: 0;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  /* The frozen prepared preview covers the solid fallback while WebGL
+     renders the same lens at the final resting coordinates. */
+  .deck-stage.mobile-glass-settling
+  .deck-card.front[data-glass-prepared="1"]
+  > .card-glass-preview {
+    opacity: 1 !important;
+  }
+}
