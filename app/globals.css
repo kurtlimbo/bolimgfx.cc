@@ -1432,3 +1432,38 @@ button:active,
     will-change: opacity;
   }
 }
+
+/* BOLIM_V452_MOBILE_FOOTER_STABILITY */
+
+@media (max-width: 600px) and (pointer: coarse) {
+
+  /*
+   * Keep the front footer on a stable
+   * compositor layer during glass movement.
+   */
+
+  .deck-stage
+  .deck-card.front > .card-footer {
+    position: relative;
+    z-index: 3;
+
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+
+    -webkit-transform: translate3d(0, 0, 1px);
+    transform: translate3d(0, 0, 1px);
+  }
+
+  /*
+   * Keep the footer visible while holding
+   * and returning to its resting position.
+   *
+   * Normal swipe opacity animations are
+   * intentionally not overridden.
+   */
+
+  .deck-stage:not(.swiping-live)
+  .deck-card.front > .card-footer {
+    opacity: 1 !important;
+  }
+}
