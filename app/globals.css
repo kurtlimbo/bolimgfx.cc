@@ -1394,3 +1394,41 @@ button:active,
     opacity: 1 !important;
   }
 }
+
+
+/* BOLIM_MOBILE_GLASS_V432_NO_BLINK */
+
+@media (max-width: 600px) and (pointer: coarse) {
+
+  /* Preserve existing swipe animation. */
+
+  .deck-stage.swiping-live
+  .deck-card > .card-glass-preview {
+    transition: none !important;
+  }
+
+  /* Prepare live WebGL behind the preview. */
+
+  .deck-stage.mobile-glass-settling
+  .deck-card.front[data-glass-prepared="1"]
+  > .card-liquid-canvas {
+    opacity: 1 !important;
+  }
+
+  /* Prevent the solid fallback from flashing. */
+
+  .deck-stage.mobile-glass-settling
+  .deck-card.front[data-glass-prepared="1"]
+  > .card-surface {
+    opacity: 0 !important;
+    transition: none !important;
+  }
+
+  /* Smooth preview-to-WebGL handoff. */
+
+  .deck-stage .deck-card.front
+  > .card-glass-preview {
+    transition: opacity 170ms ease-out;
+    will-change: opacity;
+  }
+}

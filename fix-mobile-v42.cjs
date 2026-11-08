@@ -1,12 +1,12 @@
 
 /**
- * bolimgfx — V4.3 Mobile Glass TypeScript Build Fix
- * Fixes TS18047: 'deck' is possibly 'null'.
+ * BOLIMGFX Mobile Liquid Glass
+ * V4.3.2 — No-Blink Handoff
  *
  * Run: node fix-mobile-v42.cjs
  *
- * Only updates app/page.tsx.
- * Does not modify globals.css or liquidGlass.js.
+ * Only patches app/globals.css.
+ * Desktop, shader, and animations untouched.
  */
 
 "use strict";
@@ -14,98 +14,92 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const pagePath = path.join(
-  process.cwd(),
-  "app",
-  "page.tsx"
-);
+const root = process.cwd();
+const pagePath = path.join(root, "app", "page.tsx");
+const cssPath = path.join(root, "app", "globals.css");
 
-if (!fs.existsSync(pagePath)) {
+const marker = "BOLIM_MOBILE_GLASS_V432_NO_BLINK";
+
+if (!fs.existsSync(pagePath) || !fs.existsSync(cssPath)) {
   throw new Error(
-    "app/page.tsx not found. Run from your project root."
+    "Run from your Next.js project root. Nothing changed."
   );
 }
 
-const original = fs.readFileSync(pagePath, "utf8");
+const page = fs.readFileSync(pagePath, "utf8");
+const css = fs.readFileSync(cssPath, "utf8");
 
-if (!original.includes("BOLIM_MOBILE_GLASS_V43")) {
-  throw new Error(
-    "V4.3 mobile glass patch not found. No files changed."
-  );
-}
+// Require the existing V4.3 glass system.
 
-let updated = original;
-
-const EOL = original.includes("\r\n")
-  ? "\r\n"
-  : "\n";
-
-let changes = 0;
-
-function addDeckGuard(
-  functionHeader,
-  fallback,
-  description
+if (
+  !page.includes("BOLIM_MOBILE_GLASS_V43") ||
+  !page.includes('className="card-glass-preview"') ||
+  !css.includes("BOLIM_MOBILE_GLASS_V43")
 ) {
-  const oldPart =
-    `${functionHeader}${EOL}      if (`;
-
-  const newPart =
-    `${functionHeader}${EOL}` +
-    `      const deck = deckRef.current;${EOL}` +
-    `      if (!deck) return${fallback};${EOL}` +
-    `      if (`;
-
-  const count = updated.split(oldPart).length - 1;
-
-  if (count === 1) {
-    updated = updated.replace(oldPart, newPart);
-    changes++;
-
-    console.log(`Fixed: ${description}`);
-  } else if (
-    count === 0 &&
-    updated.includes(newPart)
-  ) {
-    console.log(`Already fixed: ${description}`);
-  } else {
-    throw new Error(
-      `Unexpected ${description} structure. No files changed.`
-    );
-  }
+  throw new Error(
+    "V4.3 glass system not found. Nothing changed."
+  );
 }
 
-addDeckGuard(
-  "    function prepareFrontLens(targetIndex: number): boolean {",
-  " false",
-  "prepareFrontLens"
-);
+// Safe to run again.
 
-addDeckGuard(
-  "    function warmNeighbors() {",
-  "",
-  "warmNeighbors"
-);
-
-if (changes === 0) {
-  console.log(
-    "TypeScript deck guards already installed. No changes needed."
-  );
-
+if (css.includes(marker)) {
+  console.log("V4.3.2 already applied.");
   process.exit(0);
 }
 
-const backupPath =
-  pagePath + ".before-deck-null-fix";
+const patch = `
+/* ${marker} */
 
-if (!fs.existsSync(backupPath)) {
-  fs.copyFileSync(pagePath, backupPath);
+@media (max-width: 600px) and (pointer: coarse) {
+
+  /* Preserve existing swipe animation. */
+
+  .deck-stage.swiping-live
+  .deck-card > .card-glass-preview {
+    transition: none !important;
+  }
+
+  /* Prepare live WebGL behind the preview. */
+
+  .deck-stage.mobile-glass-settling
+  .deck-card.front[data-glass-prepared="1"]
+  > .card-liquid-canvas {
+    opacity: 1 !important;
+  }
+
+  /* Prevent the solid fallback from flashing. */
+
+  .deck-stage.mobile-glass-settling
+  .deck-card.front[data-glass-prepared="1"]
+  > .card-surface {
+    opacity: 0 !important;
+    transition: none !important;
+  }
+
+  /* Smooth preview-to-WebGL handoff. */
+
+  .deck-stage .deck-card.front
+  > .card-glass-preview {
+    transition: opacity 170ms ease-out;
+    will-change: opacity;
+  }
+}
+`;
+
+const backup = cssPath + ".before-v432";
+
+if (!fs.existsSync(backup)) {
+  fs.copyFileSync(cssPath, backup);
 }
 
-fs.writeFileSync(pagePath, updated, "utf8");
-
-console.log(
-  "Saved app/page.tsx. globals.css and liquidGlass.js untouched."
+fs.writeFileSync(
+  cssPath,
+  css.trimEnd() + "\n\n" + patch,
+  "utf8"
 );
 
+console.log("V4.3.2 No-Blink Glass Handoff applied.");
+console.log("Updated: app/globals.css only.");
+console.log("Desktop and existing animations preserved.");
 console.log("Next: npm run build");
