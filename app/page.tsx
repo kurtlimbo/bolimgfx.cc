@@ -9,6 +9,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { toCanvas } from "html-to-image";
+import { createRearRaster } from "./rearCardRaster";
 
 // @ts-ignore - JavaScript renderer beside this file
 import {
@@ -332,6 +333,13 @@ export default function Home() {
 
   const mobileTurnId = useRef(0);
 
+  const previewReady = useRef(
+    new Set<number>()
+  );
+
+  const updateRearPreview =
+    useRef<() => void>(() => {});
+
   const snapshots = useRef<{
     key: string;
     images: (HTMLCanvasElement | null)[];
@@ -396,6 +404,82 @@ export default function Home() {
     let capturing = false;
     let scheduled = 0;
     let lastPaint = 0;
+
+    const previewCache = new Map<
+      number,
+      Map<number, HTMLCanvasElement>
+    >();
+
+    let previewSize = "";
+
+    function refreshRearPreviews() {
+      if (!mobileGlassDevice()) return;
+
+      const activeIndex = activeRef.current;
+
+      for (const card of cards) {
+        const index = Number(
+          card.dataset.cardIndex
+        );
+
+        const depth =
+          (index - activeIndex + TOTAL) %
+          TOTAL;
+
+        const variants =
+          previewCache.get(index);
+
+        const raster =
+          card.querySelector<HTMLCanvasElement>(
+            ".card-rear-raster"
+          );
+
+        if (!raster || !variants?.size) {
+          continue;
+        }
+
+        const preferredDepth = depth || 4;
+
+        
+const selectedDepth =
+  variants.has(preferredDepth)
+    ? preferredDepth
+    : (variants.keys().next().value as number);
+
+
+        const image =
+          variants.get(selectedDepth);
+
+        if (!image) continue;
+
+        const stamp =
+          previewSize + ":" + selectedDepth;
+
+        if (
+          raster.dataset.previewStamp !==
+          stamp
+        ) {
+          raster.width = image.width;
+          raster.height = image.height;
+
+          raster
+            .getContext("2d")
+            ?.drawImage(image, 0, 0);
+
+          raster.dataset.previewStamp =
+            stamp;
+        }
+
+        previewReady.current.add(index);
+
+        card.classList.add(
+          "has-rear-preview"
+        );
+      }
+    }
+
+    updateRearPreview.current =
+      refreshRearPreviews;
 
     function getQuad(
       card: HTMLElement,
@@ -628,7 +712,29 @@ export default function Home() {
         SNAPSHOT_DPR_CAP
       );
 
-      const key = `${width}:${height}:${dpr}`;
+      const key =
+        `${width}:${height}:${dpr}`;
+
+      if (
+        mobileGlassDevice() &&
+        previewSize !== key
+      ) {
+        previewSize = key;
+        previewCache.clear();
+        previewReady.current.clear();
+
+        for (const card of cards) {
+          card.classList.remove(
+            "has-rear-preview"
+          );
+
+          card.querySelector<HTMLCanvasElement>(
+            ".card-rear-raster"
+          )?.removeAttribute(
+            "data-preview-stamp"
+          );
+        }
+      }
 
       if (
         key === snapshots.current.key &&
@@ -710,6 +816,10 @@ export default function Home() {
             .querySelector(".card-liquid-canvas")
             ?.remove();
 
+          clone.querySelector(
+            ".card-rear-raster"
+          )?.remove();
+
           host.appendChild(clone);
 
           try {
@@ -743,6 +853,67 @@ export default function Home() {
             };
 
             queue();
+
+            // Create blur textures only
+            // when the browser is idle.
+
+            if (mobileGlassDevice()) {
+              const slot =
+                (index -
+                  activeRef.current +
+                  TOTAL) % TOTAL;
+
+              const first = slot || 4;
+
+              const order = [
+                first, 1, 2, 3, 4
+              ].filter(
+                (depth, i, all) =>
+                  all.indexOf(depth) === i
+              );
+
+              let variants =
+                previewCache.get(index);
+
+              if (!variants) {
+                variants = new Map();
+                previewCache.set(
+                  index,
+                  variants
+                );
+              }
+
+              for (const depth of order) {
+                if (disposed) break;
+
+                await waitForSwipe();
+                await idle();
+
+                if (
+                  disposed ||
+                  previewSize !== key
+                ) {
+                  break;
+                }
+
+                if (
+                  !variants.has(depth) &&
+                  images[index]
+                ) {
+                  variants.set(
+                    depth,
+                    createRearRaster(
+                      images[index]!,
+                      width,
+                      height,
+                      depth
+                    )
+                  );
+
+                  refreshRearPreviews();
+                }
+              }
+            }
 
             if (index === priority) {
               await new Promise<void>((resolve) => {
@@ -810,11 +981,13 @@ export default function Home() {
 
       repaint.current = () => {};
       renderSettledGlass.current = () => {};
+      updateRearPreview.current = () => {};
     };
   }, []);
 
   useEffect(() => {
     repaint.current();
+    updateRearPreview.current();
   }, [active]);
 
   // =======================================
@@ -1094,6 +1267,19 @@ export default function Home() {
           card.querySelector<HTMLElement>(
             ".card-surface"
           ),
+
+        rearRaster:
+          card.querySelector<HTMLElement>(
+            ".card-rear-raster"
+          ),
+
+        startRasterOpacity: Number(
+          getComputedStyle(
+            card.querySelector<HTMLElement>(
+              ".card-rear-raster"
+            )!
+          ).opacity
+        ),
       };
     });
 
@@ -1105,13 +1291,27 @@ export default function Home() {
       const old = item.card.className;
 
       item.card.className =
-        `deck-card ${role(item.index, toActive)}`;
+        `deck-card ${role(item.index, toActive)}` +
+        (
+          old.includes("has-rear-preview")
+            ? " has-rear-preview"
+            : ""
+        );
 
       const style = getComputedStyle(item.card);
 
       const endTransform = style.transform;
       const endZ = style.zIndex;
       const endFilter = style.filter;
+
+      const endRasterOpacity =
+        item.rearRaster
+          ? Number(
+              getComputedStyle(
+                item.rearRaster
+              ).opacity
+            )
+          : 0;
 
       const endOpacity = item.content.map(
         (el) =>
@@ -1126,6 +1326,7 @@ export default function Home() {
         endZ,
         endFilter,
         endOpacity,
+        endRasterOpacity,
       };
     });
 
@@ -1276,6 +1477,8 @@ export default function Home() {
       activeRef.current = toActive;
       flushSync(() => setActive(toActive));
 
+      updateRearPreview.current();
+
       completed.forEach((a) => a.cancel());
 
       incomingCard.classList.remove("glass-incoming");
@@ -1286,6 +1489,57 @@ export default function Home() {
 
       const queued = pendingSwipe.current;
       pendingSwipe.current = null;
+
+      // Finish every iPhone glass handoff
+      // before starting another queued swipe.
+
+      if (mobileGlassDevice()) {
+        stageElement.classList.add(
+          "mobile-glass-settling"
+        );
+
+        stageElement.classList.remove(
+          "swiping-live"
+        );
+
+        pendingSwipe.current = queued;
+
+        requestAnimationFrame(() => {
+          if (
+            !mounted.current ||
+            mobileTurnId.current !== turnId
+          ) {
+            return;
+          }
+
+          renderSettledGlass.current();
+
+          requestAnimationFrame(() => {
+            if (
+              !mounted.current ||
+              mobileTurnId.current !== turnId
+            ) {
+              return;
+            }
+
+            stageElement.classList.remove(
+              "mobile-glass-flight",
+              "mobile-glass-settling"
+            );
+
+            const next =
+              pendingSwipe.current;
+
+            pendingSwipe.current = null;
+
+            if (next !== null) {
+              turn(next);
+            }
+          });
+        });
+
+        return;
+      }
 
       if (queued === null) {
         stageElement.classList.remove("swiping-live");
@@ -1505,6 +1759,17 @@ export default function Home() {
           fadeEnd
         )
       );
+
+      if (mobileGlassDevice()) {
+        tween(
+          item.rearRaster,
+          "opacity",
+          item.startRasterOpacity,
+          item.endRasterOpacity,
+          fadeBegin,
+          fadeEnd
+        );
+      }
 
       if (isArriving) {
         tween(
@@ -1853,7 +2118,7 @@ export default function Home() {
           <article
             key={i}
             data-card-index={i}
-            className={`deck-card ${position(i)}`}
+            className={`deck-card ${position(i)}${previewReady.current.has(i) ? " has-rear-preview" : ""}`}
             aria-hidden={i !== active}
             inert={i !== active}
             aria-label={`Card ${i + 1} of ${TOTAL}`}
@@ -1865,6 +2130,11 @@ export default function Home() {
 
             <div
               className="card-surface"
+              aria-hidden="true"
+            />
+
+            <canvas
+              className="card-rear-raster"
               aria-hidden="true"
             />
 

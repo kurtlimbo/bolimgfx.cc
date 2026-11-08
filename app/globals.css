@@ -1216,15 +1216,21 @@ button:active,
 }
 
 
+
 /* ==========================================
-   V3.9 — MOBILE SAFARI FIX
+   BOLIM V4.2 — MOBILE STATIC REAR RASTERS
+   No blur filters on moving 3D layers.
 ========================================== */
 
-@media (max-width: 600px) and (pointer: coarse) {
+.card-rear-raster {
+  display: none;
+}
 
-  .deck-stage {
-    --rear-content-opacity: .055 !important;
-  }
+.deck-card.lens-capture .card-rear-raster {
+  display: none !important;
+}
+
+@media (max-width: 600px) and (pointer: coarse) {
 
   .deck-stage .deck-card {
     will-change: auto;
@@ -1232,13 +1238,7 @@ button:active,
     backface-visibility: hidden;
   }
 
-  .deck-stage .deck-card.front {
-    -webkit-filter: none;
-    filter: none;
-  }
-
-  /* Avoid full-card blur interfering with
-     3D transforms on mobile browsers. */
+  /* Keep the moving outer card unfiltered */
 
   .deck-stage .deck-card:is(
     .rear-one,
@@ -1246,46 +1246,11 @@ button:active,
     .rear-three,
     .rear-four
   ) {
-    -webkit-filter: none;
-    filter: none;
+    -webkit-filter: none !important;
+    filter: none !important;
   }
 
-  /* Progressive depth softness */
-
-  .deck-stage
-  .deck-card.rear-one
-  .card-surface {
-    opacity: .96;
-    -webkit-filter: blur(.5px);
-    filter: blur(.5px);
-  }
-
-  .deck-stage
-  .deck-card.rear-two
-  .card-surface {
-    opacity: .91;
-    -webkit-filter: blur(1px);
-    filter: blur(1px);
-  }
-
-  .deck-stage
-  .deck-card.rear-three
-  .card-surface {
-    opacity: .85;
-    -webkit-filter: blur(1.8px);
-    filter: blur(1.8px);
-  }
-
-  .deck-stage
-  .deck-card.rear-four
-  .card-surface {
-    opacity: .78;
-    -webkit-filter: blur(2.4px);
-    filter: blur(2.4px);
-  }
-
-  /* Prevent rear content from competing
-     with active-card typography. */
+  /* No live blur on moving content layers */
 
   .deck-stage .deck-card:is(
     .rear-one,
@@ -1293,11 +1258,66 @@ button:active,
     .rear-three,
     .rear-four
   ) > :is(
+    .card-surface,
     .card-header,
     .card-body,
     .card-footer
   ) {
-    opacity: var(--rear-content-opacity);
+    -webkit-filter: none !important;
+    filter: none !important;
+  }
+
+  /* Pre-blurred static canvas */
+
+  .deck-stage .deck-card
+  > .card-rear-raster {
+    display: block;
+    position: absolute;
+    inset: 0;
+
+    width: 100%;
+    height: 100%;
+
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 2;
+    opacity: 0;
+  }
+
+  /* Rear cards show the blurred texture */
+
+  .deck-stage
+  .deck-card.has-rear-preview:is(
+    .rear-one,
+    .rear-two,
+    .rear-three,
+    .rear-four
+  ) > .card-rear-raster {
+    opacity: 1;
+  }
+
+  /* Avoid double-rendered text */
+
+  .deck-stage
+  .deck-card.has-rear-preview:is(
+    .rear-one,
+    .rear-two,
+    .rear-three,
+    .rear-four
+  ) > :is(
+    .card-surface,
+    .card-header,
+    .card-body,
+    .card-footer
+  ) {
+    opacity: 0;
+  }
+
+  /* Front card remains clear and interactive */
+
+  .deck-stage .deck-card.front
+  > .card-rear-raster {
+    opacity: 0;
   }
 
   .deck-stage .deck-card.front > :is(
@@ -1306,102 +1326,39 @@ button:active,
     .card-footer
   ) {
     opacity: 1;
-    -webkit-filter: none;
-    filter: none;
-  }
-}
-
-
-
-/* ==========================================
-   BOLIMGFX V4.1 — MOBILE REAR DEPTH BLUR
-   Same progressive blur as desktop
-   Preserves V4.0 stable refraction
-========================================== */
-
-@media (max-width: 600px) and (pointer: coarse) {
-
-  /* Match original desktop blur values */
-
-  .deck-stage .deck-card.rear-one {
-    --mobile-depth-blur: 1.5px;
-  }
-
-  .deck-stage .deck-card.rear-two {
-    --mobile-depth-blur: 2px;
-  }
-
-  .deck-stage .deck-card.rear-three {
-    --mobile-depth-blur: 3.5px;
-  }
-
-  .deck-stage .deck-card.rear-four {
-    --mobile-depth-blur: 4px;
-  }
-
-  /* Keep the 3D moving layer unfiltered
-     to avoid Safari transform flickering */
-
-  .deck-stage .deck-card:is(
-    .rear-one,
-    .rear-two,
-    .rear-three,
-    .rear-four
-  ) {
     -webkit-filter: none !important;
     filter: none !important;
   }
 
-  /* Blur rear-card background and borders */
+  /* Stable V4.0 Liquid Glass handoff */
 
-  .deck-stage .deck-card:is(
-    .rear-one,
-    .rear-two,
-    .rear-three,
-    .rear-four
-  ) > .card-surface {
+  .deck-stage.mobile-glass-flight
+  .deck-card.glass-incoming
+  .card-liquid-canvas {
+    opacity: 0 !important;
+  }
+
+  .deck-stage.mobile-glass-flight
+  .deck-card.glass-incoming
+  .card-surface {
     opacity: 1 !important;
-
-    -webkit-filter:
-      blur(var(--mobile-depth-blur)) !important;
-
-    filter:
-      blur(var(--mobile-depth-blur)) !important;
   }
 
-  /* Apply matching blur to rear-card content */
-
-  .deck-stage .deck-card:is(
-    .rear-one,
-    .rear-two,
-    .rear-three,
-    .rear-four
-  ) > :is(
-    .card-header,
-    .card-body,
-    .card-footer
-  ) {
-    opacity:
-      var(--rear-content-opacity, .26) !important;
-
-    -webkit-filter:
-      blur(var(--mobile-depth-blur)) !important;
-
-    filter:
-      blur(var(--mobile-depth-blur)) !important;
+  .deck-stage.mobile-glass-settling
+  .deck-card {
+    transition: none !important;
   }
 
-  /* Keep the active front card sharp */
+  .deck-stage.mobile-glass-settling
+  .deck-card.front
+  .card-liquid-canvas {
+    opacity: 0 !important;
+  }
 
-  .deck-stage .deck-card.front,
-  .deck-stage .deck-card.front > .card-surface,
-  .deck-stage .deck-card.front > :is(
-    .card-header,
-    .card-body,
-    .card-footer
-  ) {
-    -webkit-filter: none !important;
-    filter: none !important;
+  .deck-stage.mobile-glass-settling
+  .deck-card.front
+  .card-surface {
+    opacity: 1 !important;
+    transition: none !important;
   }
 }
-
