@@ -313,6 +313,7 @@ export default function Home() {
 
   const deckRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<DragStart | null>(null);
+  const dragFollowUntil = useRef(0);
 
   const busy = useRef(false);
   const flightRunning = useRef(false);
@@ -410,6 +411,7 @@ export default function Home() {
     let capturing = false;
     let scheduled = 0;
     let lastPaint = 0;
+    let lastDragPose = "";
 
     const previewCache = new Map<
       number,
@@ -663,6 +665,9 @@ const selectedDepth =
 
       scheduled = requestAnimationFrame((time) => {
         scheduled = 0;
+        // BOLIM_GLASS_DRAG_V451_DECK_GUARD
+        const deck = deckRef.current;
+        if (!deck) return;
 
         // Freeze mobile glass during the 3D orbit.
         if (
@@ -671,6 +676,61 @@ const selectedDepth =
         ) {
           return;
         }
+
+        // BOLIM_GLASS_DRAG_SYNC_V45
+        const trackingDrag =
+          dragStart.current !== null &&
+          deck.classList.contains("dragging");
+
+        const trackingReturn =
+          !flightRunning.current &&
+          time < dragFollowUntil.current;
+
+        if (trackingDrag || trackingReturn) {
+          const frontCard = cards.find(
+            c => c.classList.contains("front")
+          );
+
+          const nextIndex = frontCard
+            ? (Number(frontCard.dataset.cardIndex) + 1) % TOTAL
+            : -1;
+
+          const nextCard = cards.find(
+            c => Number(c.dataset.cardIndex) === nextIndex
+          );
+
+          const frontRect =
+            frontCard?.getBoundingClientRect();
+
+          const rearRect =
+            nextCard?.getBoundingClientRect();
+
+          const coords = (r: DOMRect | undefined) => r
+            ? [r.left, r.top, r.width, r.height]
+                .map(n => n.toFixed(2)).join(",")
+            : "missing";
+
+          const poseKey = [
+            coords(frontRect),
+            coords(rearRect),
+            deck.clientWidth,
+            deck.clientHeight,
+            mouse.current.x.toFixed(3),
+            mouse.current.y.toFixed(3),
+            nextIndex >= 0 &&
+              !!snapshots.current.images[nextIndex],
+          ].join("|");
+
+          if (poseKey !== lastDragPose) {
+            lastDragPose = poseKey;
+            paint();
+          }
+
+          queue();
+          return;
+        }
+
+        lastDragPose = "";
 
         const interval = flightRunning.current
           ? GLASS_FLIGHT_INTERVAL
@@ -692,6 +752,8 @@ const selectedDepth =
     renderSettledGlass.current = () => { void paint(); };
 
     function prepareFrontLens(targetIndex: number): boolean {
+      if (dragStart.current !== null) return false;
+
       const deck = deckRef.current;
       if (!deck) return false;
       if (
@@ -777,6 +839,8 @@ const selectedDepth =
     prepareIncomingGlass.current = prepareFrontLens;
 
     function warmNeighbors() {
+      if (dragStart.current !== null) return;
+
       const deck = deckRef.current;
       if (!deck) return;
       if (
@@ -824,7 +888,7 @@ const selectedDepth =
       });
 
     const waitForSwipe = async () => {
-      while (!disposed && flightRunning.current) {
+      while (!disposed && (flightRunning.current || dragStart.current !== null)) {
         await new Promise<void>((resolve) =>
           window.setTimeout(resolve, 90)
         );
@@ -1173,6 +1237,9 @@ const selectedDepth =
     const deck = deckRef.current;
     if (!deck) return;
 
+    if (deck.classList.contains("dragging")) {
+      dragFollowUntil.current = performance.now() + 900;
+    }
     deck.classList.remove("dragging");
     deck.style.setProperty("--drag-x", "0px");
     deck.style.setProperty("--drag-rotate", "0deg");
@@ -2036,7 +2103,9 @@ const selectedDepth =
         Math.abs(dx) > 8 &&
         Math.abs(dx) > Math.abs(dy) * 1.15
       ) {
-        resetParallax();
+        if (!e.currentTarget.classList.contains("dragging")) {
+          resetParallax();
+        }
 
         const amount = Math.max(
           -100,
