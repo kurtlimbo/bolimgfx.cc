@@ -692,6 +692,8 @@ const selectedDepth =
     renderSettledGlass.current = () => { void paint(); };
 
     function prepareFrontLens(targetIndex: number): boolean {
+      const deck = deckRef.current;
+      if (!deck) return false;
       if (
         disposed ||
         !mobileGlassDevice() ||
@@ -775,6 +777,8 @@ const selectedDepth =
     prepareIncomingGlass.current = prepareFrontLens;
 
     function warmNeighbors() {
+      const deck = deckRef.current;
+      if (!deck) return;
       if (
         disposed || !mobileGlassDevice() ||
         flightRunning.current || warmTimer !== null
