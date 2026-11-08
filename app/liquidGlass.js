@@ -525,12 +525,169 @@ function makeProfile(
 // GENUINE BACKDROP GAUSSIAN BLUR
 // ==========================================
 
+
+// V3.9 — Mobile Safari compatible blur.
+
+function isMobileTouch() {
+  return typeof window !== "undefined" &&
+    window.matchMedia(
+      "(max-width: 600px) and (pointer: coarse)"
+    ).matches;
+}
+
+function isIOSWebKit() {
+  return typeof navigator !== "undefined" &&
+    /iPhone|iPad|iPod/.test(navigator.userAgent);
+}
+
+// Separable two-pass box blur.
+// Cached per snapshot to avoid repeated work.
+
+function boxBlurSource(
+  ctx,
+  width,
+  height,
+  sigma
+) {
+  const radius = Math.max(
+    1,
+    Math.min(
+      24,
+      Math.ceil(sigma * 1.7)
+    )
+  );
+
+  const windowSize = radius * 2 + 1;
+
+  const image = ctx.getImageData(
+    0,
+    0,
+    width,
+    height
+  );
+
+  const src = image.data;
+
+  const horizontal =
+    new Uint8ClampedArray(src.length);
+
+  const dst = image.data;
+
+  // Horizontal pass
+
+  for (let y = 0; y < height; y++) {
+    const row = y * width * 4;
+    const sum = [0, 0, 0, 0];
+
+    for (
+      let k = -radius;
+      k <= radius;
+      k++
+    ) {
+      const p =
+        row +
+        Math.max(
+          0,
+          Math.min(width - 1, k)
+        ) * 4;
+
+      for (let c = 0; c < 4; c++) {
+        sum[c] += src[p + c];
+      }
+    }
+
+    for (let x = 0; x < width; x++) {
+      const p = row + x * 4;
+
+      for (let c = 0; c < 4; c++) {
+        horizontal[p + c] =
+          sum[c] / windowSize;
+      }
+
+      const remove =
+        row +
+        Math.max(0, x - radius) * 4;
+
+      const add =
+        row +
+        Math.min(
+          width - 1,
+          x + radius + 1
+        ) * 4;
+
+      for (let c = 0; c < 4; c++) {
+        sum[c] +=
+          src[add + c] -
+          src[remove + c];
+      }
+    }
+  }
+
+  // Vertical pass
+
+  for (let x = 0; x < width; x++) {
+    const sum = [0, 0, 0, 0];
+
+    for (
+      let k = -radius;
+      k <= radius;
+      k++
+    ) {
+      const p =
+        (
+          Math.max(
+            0,
+            Math.min(height - 1, k)
+          ) * width + x
+        ) * 4;
+
+      for (let c = 0; c < 4; c++) {
+        sum[c] += horizontal[p + c];
+      }
+    }
+
+    for (let y = 0; y < height; y++) {
+      const p = (y * width + x) * 4;
+
+      for (let c = 0; c < 4; c++) {
+        dst[p + c] =
+          sum[c] / windowSize;
+      }
+
+      const remove =
+        (
+          Math.max(0, y - radius) *
+          width + x
+        ) * 4;
+
+      const add =
+        (
+          Math.min(
+            height - 1,
+            y + radius + 1
+          ) * width + x
+        ) * 4;
+
+      for (let c = 0; c < 4; c++) {
+        sum[c] +=
+          horizontal[add + c] -
+          horizontal[remove + c];
+      }
+    }
+  }
+
+  ctx.putImageData(image, 0, 0);
+}
+
 function gaussianSource(
   source,
   sigmaPixels,
   allowCache = true
 ) {
-  if (!source || sigmaPixels <= 0.01) {
+  if (
+    !source ||
+    sigmaPixels <= 0.01
+  ) {
     return source;
   }
 
@@ -543,7 +700,8 @@ function gaussianSource(
   const key = sigma.toFixed(3);
 
   if (allowCache) {
-    const cached = gaussianCache.get(source);
+    const cached =
+      gaussianCache.get(source);
 
     if (
       cached &&
@@ -561,23 +719,68 @@ function gaussianSource(
   canvas.width = source.width;
   canvas.height = source.height;
 
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext(
+    "2d",
+    { willReadFrequently: true }
+  );
 
   if (!ctx) return source;
 
-  ctx.clearRect(
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  );
+  const nativeBlur =
+    !isIOSWebKit() &&
+    typeof ctx.filter === "string";
 
-  // Blur the entire rear-card image continuously.
-  // No spaced-out samples or tangent smearing.
+  try {
+    if (nativeBlur) {
+      ctx.filter = `blur(${sigma}px)`;
 
-  ctx.filter = `blur(${sigma}px)`;
-  ctx.drawImage(source, 0, 0);
-  ctx.filter = "none";
+      ctx.drawImage(
+        source,
+        0,
+        0
+      );
+
+      ctx.filter = "none";
+    } else {
+      ctx.drawImage(
+        source,
+        0,
+        0
+      );
+
+      if (
+        canvas.width > 1 &&
+        canvas.height > 1
+      ) {
+        boxBlurSource(
+          ctx,
+          canvas.width,
+          canvas.height,
+          sigma
+        );
+      }
+    }
+  } catch (error) {
+    console.warn(
+      "Glass blur fallback:",
+      error
+    );
+
+    ctx.filter = "none";
+
+    ctx.clearRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    ctx.drawImage(
+      source,
+      0,
+      0
+    );
+  }
 
   if (allowCache) {
     gaussianCache.set(source, {
@@ -670,7 +873,12 @@ function opticsFor(opt) {
     ),
 
     blur: clamp(
-      Number(opt.blur ?? 0),
+      isMobileTouch()
+        ? Math.max(
+            7.5,
+            Number(opt.blur ?? 0)
+          )
+        : Number(opt.blur ?? 0),
       0,
       10
     ),
@@ -998,7 +1206,7 @@ function createWebGLRenderer(canvas) {
 
       const dpr = Math.min(
         window.devicePixelRatio || 1,
-        1.5
+        isMobileTouch() ? 1.15 : 1.5
       );
 
       const width = Math.max(
@@ -1035,7 +1243,7 @@ function createWebGLRenderer(canvas) {
       );
 
       const sceneInput =
-        settings.blur > 0 && !opt.sourceImage
+        settings.blur > 0 && !opt.sourceImage && !isIOSWebKit()
           ? gaussianSource(
               scene,
               settings.blur *
@@ -1303,7 +1511,7 @@ function createCanvasRenderer(canvas) {
         : null;
 
       const sceneInput =
-        settings.blur > 0 && !useCard
+        settings.blur > 0 && !useCard && !isIOSWebKit()
           ? gaussianSource(
               scene,
               settings.blur *

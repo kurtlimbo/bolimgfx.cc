@@ -1214,3 +1214,99 @@ button:active,
 .deck-card.rear-four {
   filter: blur(4px);
 }
+
+
+/* ==========================================
+   V3.9 — MOBILE SAFARI FIX
+========================================== */
+
+@media (max-width: 600px) and (pointer: coarse) {
+
+  .deck-stage {
+    --rear-content-opacity: .055 !important;
+  }
+
+  .deck-stage .deck-card {
+    will-change: auto;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
+
+  .deck-stage .deck-card.front {
+    -webkit-filter: none;
+    filter: none;
+  }
+
+  /* Avoid full-card blur interfering with
+     3D transforms on mobile browsers. */
+
+  .deck-stage .deck-card:is(
+    .rear-one,
+    .rear-two,
+    .rear-three,
+    .rear-four
+  ) {
+    -webkit-filter: none;
+    filter: none;
+  }
+
+  /* Progressive depth softness */
+
+  .deck-stage
+  .deck-card.rear-one
+  .card-surface {
+    opacity: .96;
+    -webkit-filter: blur(.5px);
+    filter: blur(.5px);
+  }
+
+  .deck-stage
+  .deck-card.rear-two
+  .card-surface {
+    opacity: .91;
+    -webkit-filter: blur(1px);
+    filter: blur(1px);
+  }
+
+  .deck-stage
+  .deck-card.rear-three
+  .card-surface {
+    opacity: .85;
+    -webkit-filter: blur(1.8px);
+    filter: blur(1.8px);
+  }
+
+  .deck-stage
+  .deck-card.rear-four
+  .card-surface {
+    opacity: .78;
+    -webkit-filter: blur(2.4px);
+    filter: blur(2.4px);
+  }
+
+  /* Prevent rear content from competing
+     with active-card typography. */
+
+  .deck-stage .deck-card:is(
+    .rear-one,
+    .rear-two,
+    .rear-three,
+    .rear-four
+  ) > :is(
+    .card-header,
+    .card-body,
+    .card-footer
+  ) {
+    opacity: var(--rear-content-opacity);
+  }
+
+  .deck-stage .deck-card.front > :is(
+    .card-header,
+    .card-body,
+    .card-footer
+  ) {
+    opacity: 1;
+    -webkit-filter: none;
+    filter: none;
+  }
+}
