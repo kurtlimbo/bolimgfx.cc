@@ -313,9 +313,6 @@ export default function Home() {
 
   const deckRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<DragStart | null>(null);
-  // BOLIM_DRAG_SMOOTH_V44
-  const dragRaf = useRef<number | null>(null);
-  const latestDragAmount = useRef(0);
 
   const busy = useRef(false);
   const flightRunning = useRef(false);
@@ -379,9 +376,6 @@ export default function Home() {
 
       if (raf.current !== null)
         cancelAnimationFrame(raf.current);
-
-      if (dragRaf.current !== null)
-        cancelAnimationFrame(dragRaf.current);
     };
   }, []);
 
@@ -678,12 +672,9 @@ const selectedDepth =
           return;
         }
 
-        const interval =
-          dragStart.current !== null
-            ? (mobileGlassDevice() ? 60 : 38)
-            : flightRunning.current
-              ? GLASS_FLIGHT_INTERVAL
-              : GLASS_IDLE_INTERVAL;
+        const interval = flightRunning.current
+          ? GLASS_FLIGHT_INTERVAL
+          : GLASS_IDLE_INTERVAL;
 
         if (time - lastPaint >= interval) {
           paint();
@@ -701,7 +692,6 @@ const selectedDepth =
     renderSettledGlass.current = () => { void paint(); };
 
     function prepareFrontLens(targetIndex: number): boolean {
-      if (dragStart.current !== null) return false;
       const deck = deckRef.current;
       if (!deck) return false;
       if (
@@ -787,7 +777,6 @@ const selectedDepth =
     prepareIncomingGlass.current = prepareFrontLens;
 
     function warmNeighbors() {
-      if (dragStart.current !== null) return;
       const deck = deckRef.current;
       if (!deck) return;
       if (
@@ -835,7 +824,7 @@ const selectedDepth =
       });
 
     const waitForSwipe = async () => {
-      while (!disposed && (flightRunning.current || dragStart.current !== null)) {
+      while (!disposed && flightRunning.current) {
         await new Promise<void>((resolve) =>
           window.setTimeout(resolve, 90)
         );
@@ -1181,10 +1170,6 @@ const selectedDepth =
   }
 
   function resetDrag() {
-    if (dragRaf.current !== null) {
-      cancelAnimationFrame(dragRaf.current);
-      dragRaf.current = null;
-    }
     const deck = deckRef.current;
     if (!deck) return;
 
@@ -2032,35 +2017,17 @@ const selectedDepth =
     }
   }
 
-  function applyDragFrame() {
-    dragRaf.current = null;
-    const deck = deckRef.current;
-    if (
-      !deck ||
-      !dragStart.current ||
-      busy.current ||
-      !deck.classList.contains("dragging")
-    ) return;
-
-    const amount = latestDragAmount.current;
-    deck.style.setProperty("--drag-x", `${amount}px`);
-    deck.style.setProperty(
-      "--drag-rotate",
-      `${(-amount * 0.13).toFixed(2)}deg`
-    );
-    mouse.current = { x: amount / 250, y: -0.12 };
-    deck.style.setProperty("--light-x", `${50 + amount * 0.28}%`);
-    deck.style.setProperty("--light-y", "12%");
-    repaint.current();
-  }
-
   function onPointerMove(
     e: PointerEvent<HTMLDivElement>
   ) {
     const start = dragStart.current;
 
     if (start && start.pointerId === e.pointerId) {
-      if (busy.current || pendingFrame.current !== null) return;
+      if (
+        busy.current ||
+        pendingFrame.current !== null
+      )
+        return;
 
       const dx = e.clientX - start.x;
       const dy = e.clientY - start.y;
@@ -2069,20 +2036,38 @@ const selectedDepth =
         Math.abs(dx) > 8 &&
         Math.abs(dx) > Math.abs(dy) * 1.15
       ) {
-        const deck = e.currentTarget;
+        resetParallax();
 
-        if (!deck.classList.contains("dragging")) {
-          resetParallax();
-          deck.classList.add("dragging");
-        }
+        const amount = Math.max(
+          -100,
+          Math.min(100, dx)
+        );
 
-        latestDragAmount.current =
-          Math.max(-100, Math.min(100, dx));
+        e.currentTarget.classList.add("dragging");
+        e.currentTarget.style.setProperty(
+          "--drag-x",
+          `${amount}px`
+        );
+        e.currentTarget.style.setProperty(
+          "--drag-rotate",
+          `${(-amount * 0.13).toFixed(2)}deg`
+        );
 
-        if (dragRaf.current === null) {
-          dragRaf.current =
-            requestAnimationFrame(applyDragFrame);
-        }
+        mouse.current = {
+          x: amount / 250,
+          y: -0.12,
+        };
+
+        e.currentTarget.style.setProperty(
+          "--light-x",
+          `${50 + amount * 0.28}%`
+        );
+        e.currentTarget.style.setProperty(
+          "--light-y",
+          "12%"
+        );
+
+        repaint.current();
       }
 
       return;
@@ -2150,11 +2135,6 @@ const selectedDepth =
   function onPointerUp(
     e: PointerEvent<HTMLDivElement>
   ) {
-    if (dragRaf.current !== null &&
-        dragStart.current?.pointerId === e.pointerId) {
-      cancelAnimationFrame(dragRaf.current);
-      applyDragFrame();
-    }
     const start = dragStart.current;
     dragStart.current = null;
 
